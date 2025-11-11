@@ -22,10 +22,10 @@ jobs:
       - name: Checkout automation repo
         uses: actions/checkout@v4
 
-      - name: Authenticate GitHub CLI
+      - name: Verify GitHub authentication
+        run: gh auth status
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: echo "$GH_TOKEN" | gh auth login --with-token
+            GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Create new repo from FastAPI template
         env:
