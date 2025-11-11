@@ -14,36 +14,36 @@ on:
 jobs:
   create:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: read
-      id-token: write
 
     steps:
       - name: Checkout automation repo
         uses: actions/checkout@v4
 
-      - name: Verify GitHub authentication
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh auth status || echo "Authenticated using GITHUB_TOKEN"
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gh
 
-      - name: Try creating new repo from FastAPI template
+      - name: Authenticate GitHub CLI
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: gh auth status || echo "✅ Authenticated via GH_PAT"
+
+      - name: Create new repo from FastAPI template
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
           SERVICE_NAME: ${{ github.event.inputs.service_name }}
         run: |
           echo "🚀 Creating new FastAPI service: $SERVICE_NAME"
           gh repo create hoppetoss/$SERVICE_NAME \
             --template hoppetoss/template-fastapi-service \
             --public \
-            -y || echo "⚠️ Repo creation not permitted, skipping"
+            -y || echo "⚠️ Repo already exists, skipping creation"
+          echo "✅ Repository ready: https://github.com/hoppetoss/$SERVICE_NAME"
 
-          echo "✅ Repository ready or already existed: https://github.com/hoppetoss/$SERVICE_NAME"
-
-      - name: Clone and configure repo
+      - name: Clone and configure new repo
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
           SERVICE_NAME: ${{ github.event.inputs.service_name }}
           ENVIRONMENT: ${{ github.event.inputs.environment }}
         run: |
