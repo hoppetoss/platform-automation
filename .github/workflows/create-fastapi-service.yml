@@ -17,8 +17,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      # repository permission lets workflow token create repos
-      repository: write
+      administration: write   # ✅ correct key
+      metadata: read
 
     steps:
       - name: Checkout automation repo
