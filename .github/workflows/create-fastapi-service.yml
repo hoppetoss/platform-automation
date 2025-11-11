@@ -1,0 +1,63 @@
+name: Create New FastAPI Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Name of the new FastAPI service (e.g., orders-service)"
+        required: true
+      environment:
+        description: "Deployment environment (e.g., dev, staging, prod)"
+        required: false
+        default: "dev"
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout automation repo
+        uses: actions/checkout@v4
+
+      - name: Authenticate GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: echo "$GH_TOKEN" | gh auth login --with-token
+
+      - name: Create new repo from FastAPI template
+        env:
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
+          echo "🚀 Creating new FastAPI service: $SERVICE_NAME"
+          gh repo create hoppetoss/$SERVICE_NAME \
+            --template hoppetoss/template-fastapi-service \
+            --public \
+            --confirm
+          echo "✅ Repository created: https://github.com/hoppetoss/$SERVICE_NAME"
+
+      - name: Clone and configure new repo
+        env:
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          git clone https://github.com/hoppetoss/$SERVICE_NAME
+          cd $SERVICE_NAME
+
+          echo "SERVICE_NAME=$SERVICE_NAME" > .env
+          echo "ENVIRONMENT=$ENVIRONMENT" >> .env
+          echo "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces" >> .env
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          git add .env
+          git commit -m "Add environment configuration"
+          git push origin master
+
+      - name: Output success
+        run: |
+          echo "🎉 FastAPI service ready:"
+          echo "🔗 https://github.com/hoppetoss/${{ github.event.inputs.service_name }}"
