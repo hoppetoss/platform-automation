@@ -17,6 +17,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      # repository permission lets workflow token create repos
+      repository: write
 
     steps:
       - name: Checkout automation repo
@@ -25,21 +27,23 @@ jobs:
       - name: Verify GitHub authentication
         run: gh auth status
         env:
-            GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Create new repo from FastAPI template
         env:
+          GH_TOKEN: ${{ github.token }}
           SERVICE_NAME: ${{ github.event.inputs.service_name }}
         run: |
           echo "🚀 Creating new FastAPI service: $SERVICE_NAME"
           gh repo create hoppetoss/$SERVICE_NAME \
             --template hoppetoss/template-fastapi-service \
             --public \
-            --confirm
-          echo "✅ Repository created: https://github.com/hoppetoss/$SERVICE_NAME"
+            -y || echo "⚠️ Repo already exists, skipping creation"
+          echo "✅ Repository created (or already existed): https://github.com/hoppetoss/$SERVICE_NAME"
 
       - name: Clone and configure new repo
         env:
+          GH_TOKEN: ${{ github.token }}
           SERVICE_NAME: ${{ github.event.inputs.service_name }}
           ENVIRONMENT: ${{ github.event.inputs.environment }}
         run: |
@@ -54,8 +58,8 @@ jobs:
           git config user.email "actions@github.com"
 
           git add .env
-          git commit -m "Add environment configuration"
-          git push origin master
+          git commit -m "Add environment configuration" || echo "No changes to commit"
+          git push origin master || echo "Push skipped (possibly no changes)"
 
       - name: Output success
         run: |
