@@ -25,7 +25,7 @@ jobs:
       - name: Verify GitHub authentication
         run: gh auth status
         env:
-            GH_TOKEN: ${{ secrets.GH_TOKEN }}
+            GH_TOKEN: ${{ github.token }}
 
       - name: Create new repo from FastAPI template
         env:
