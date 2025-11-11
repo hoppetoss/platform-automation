@@ -27,7 +27,9 @@ jobs:
       - name: Authenticate GitHub CLI
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: gh auth status || echo "✅ Authenticated via GH_PAT"
+        run: |
+          echo "$GH_TOKEN" | gh auth login --with-token
+          gh auth status
 
       - name: Create new repo from FastAPI template
         env:
@@ -41,7 +43,7 @@ jobs:
             -y || echo "⚠️ Repo already exists, skipping creation"
           echo "✅ Repository ready: https://github.com/hoppetoss/$SERVICE_NAME"
 
-      - name: Clone and configure new repo
+      - name: Configure .env for new service
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           SERVICE_NAME: ${{ github.event.inputs.service_name }}
@@ -50,16 +52,17 @@ jobs:
           gh repo clone hoppetoss/$SERVICE_NAME
           cd $SERVICE_NAME
 
-          echo "SERVICE_NAME=$SERVICE_NAME" > .env
-          echo "ENVIRONMENT=$ENVIRONMENT" >> .env
-          echo "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces" >> .env
+          cat <<EOF > .env
+SERVICE_NAME=$SERVICE_NAME
+ENVIRONMENT=$ENVIRONMENT
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+EOF
 
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-
           git add .env
           git commit -m "Add environment configuration" || echo "No changes to commit"
-          git push origin master || echo "Push skipped (possibly no changes)"
+          git push origin main || git push origin master || echo "Push skipped (possibly no changes)"
 
       # STEP 1 — Add Helm values file in platform-infra
       - name: Register Helm values in platform-infra
@@ -71,19 +74,20 @@ jobs:
           cd platform-infra/helm/fastapi-service
 
           cat <<EOF > values-${SERVICE_NAME}.yaml
-          namespace: ${SERVICE_NAME}
-          serviceName: ${SERVICE_NAME}
-          image:
-            repository: hoppetoss/${SERVICE_NAME}
-            tag: latest
-          otel:
-            endpoint: "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"
-          EOF
+namespace: ${SERVICE_NAME}
+serviceName: ${SERVICE_NAME}
+image:
+  repository: hoppetoss/${SERVICE_NAME}
+  tag: latest
+otel:
+  endpoint: "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"
+EOF
 
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add values-${SERVICE_NAME}.yaml
           git commit -m "Add Helm values for ${SERVICE_NAME}" || echo "No changes"
+          git remote set-url origin https://${GH_TOKEN}@github.com/hoppetoss/platform-infra.git
           git push origin main || echo "Push skipped"
 
       # STEP 2 — Register Argo CD Application in platform-infra
@@ -95,37 +99,40 @@ jobs:
           cd platform-infra/argo-apps
 
           cat <<EOF > ${SERVICE_NAME}-app.yaml
-          apiVersion: argoproj.io/v1alpha1
-          kind: Application
-          metadata:
-            name: ${SERVICE_NAME}
-            namespace: argocd
-          spec:
-            project: default
-            source:
-              repoURL: 'https://github.com/hoppetoss/platform-infra.git'
-              targetRevision: main
-              path: helm/fastapi-service
-              helm:
-                valueFiles:
-                  - helm/fastapi-service/values-${SERVICE_NAME}.yaml
-            destination:
-              server: https://kubernetes.default.svc
-              namespace: ${SERVICE_NAME}
-            syncPolicy:
-              automated:
-                prune: true
-                selfHeal: true
-          EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/hoppetoss/platform-infra.git'
+    targetRevision: main
+    path: helm/fastapi-service
+    helm:
+      valueFiles:
+        - values-${SERVICE_NAME}.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${SERVICE_NAME}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+EOF
 
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add ${SERVICE_NAME}-app.yaml
           git commit -m "Add Argo CD app for ${SERVICE_NAME}" || echo "No changes"
+          git remote set-url origin https://${GH_TOKEN}@github.com/hoppetoss/platform-infra.git
           git push origin main || echo "Push skipped"
 
       - name: Output success
         run: |
-          echo "🎉 FastAPI service ready:"
-          echo "🔗 https://github.com/hoppetoss/${{ github.event.inputs.service_name }}"
-          echo "🧩 Registered for GitOps in platform-infra/argo-apps/"
+          echo "🎉 FastAPI service ready!"
+          echo "🔗 Repo: https://github.com/hoppetoss/${{ github.event.inputs.service_name }}"
+          echo "🧩 GitOps registered: platform-infra/argo-apps/${{ github.event.inputs.service_name }}-app.yaml"
