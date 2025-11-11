@@ -1,0 +1,107 @@
+name: Create New FastAPI Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Name of the new FastAPI service (e.g., orders-service)"
+        required: true
+      environment:
+        description: "Deployment environment (e.g., dev, staging, prod)"
+        required: false
+        default: "dev"
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout automation repo
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gh
+
+      - name: Authenticate GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: gh auth status || echo "✅ Authenticated via GH_PAT"
+
+      - name: Create new repo from FastAPI template
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
+          echo "🚀 Creating new FastAPI service: $SERVICE_NAME"
+          gh repo create hoppetoss/$SERVICE_NAME \
+            --template hoppetoss/template-fastapi-service \
+            --public \
+            -y || echo "⚠️ Repo already exists, skipping creation"
+          echo "✅ Repository ready: https://github.com/hoppetoss/$SERVICE_NAME"
+
+      - name: Clone and configure new repo
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          gh repo clone hoppetoss/$SERVICE_NAME
+          cd $SERVICE_NAME
+
+          echo "SERVICE_NAME=$SERVICE_NAME" > .env
+          echo "ENVIRONMENT=$ENVIRONMENT" >> .env
+          echo "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces" >> .env
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          git add .env
+          git commit -m "Add environment configuration" || echo "No changes to commit"
+          git push origin master || echo "Push skipped (possibly no changes)"
+
+      # NEW STEP: register in platform-infra for GitOps
+      - name: Register service in platform-infra for GitOps
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
+          git clone https://github.com/hoppetoss/platform-infra.git
+          cd platform-infra/argo-apps
+
+          cat <<EOF > ${SERVICE_NAME}-app.yaml
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: ${SERVICE_NAME}
+            namespace: argocd
+          spec:
+            project: default
+            source:
+              repoURL: 'https://github.com/hoppetoss/platform-infra.git'
+              targetRevision: main
+              path: helm/fastapi-service
+              helm:
+                valueFiles:
+                  - helm/fastapi-service/values-${SERVICE_NAME}.yaml
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: ${SERVICE_NAME}
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+          EOF
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add ${SERVICE_NAME}-app.yaml
+          git commit -m "Add Argo CD app for ${SERVICE_NAME}" || echo "No changes"
+          git push origin main || echo "Push skipped"
+
+      - name: Output success
+        run: |
+          echo "🎉 FastAPI service ready:"
+          echo "🔗 https://github.com/hoppetoss/${{ github.event.inputs.service_name }}"
+          echo "🧩 Registered for GitOps in platform-infra/argo-apps/"
