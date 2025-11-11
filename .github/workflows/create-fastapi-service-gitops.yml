@@ -61,13 +61,37 @@ jobs:
           git commit -m "Add environment configuration" || echo "No changes to commit"
           git push origin master || echo "Push skipped (possibly no changes)"
 
-      # NEW STEP: register in platform-infra for GitOps
-      - name: Register service in platform-infra for GitOps
+      # STEP 1 — Add Helm values file in platform-infra
+      - name: Register Helm values in platform-infra
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           SERVICE_NAME: ${{ github.event.inputs.service_name }}
         run: |
           git clone https://github.com/hoppetoss/platform-infra.git
+          cd platform-infra/helm/fastapi-service
+
+          cat <<EOF > values-${SERVICE_NAME}.yaml
+          namespace: ${SERVICE_NAME}
+          serviceName: ${SERVICE_NAME}
+          image:
+            repository: hoppetoss/${SERVICE_NAME}
+            tag: latest
+          otel:
+            endpoint: "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"
+          EOF
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add values-${SERVICE_NAME}.yaml
+          git commit -m "Add Helm values for ${SERVICE_NAME}" || echo "No changes"
+          git push origin main || echo "Push skipped"
+
+      # STEP 2 — Register Argo CD Application in platform-infra
+      - name: Register service in platform-infra for GitOps
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
           cd platform-infra/argo-apps
 
           cat <<EOF > ${SERVICE_NAME}-app.yaml
