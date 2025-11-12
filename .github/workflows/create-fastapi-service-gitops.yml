@@ -101,9 +101,9 @@ jobs:
           EOF
 
           git add .github/workflows/build.yml
-          git commit -m "Add CI build and push pipeline"
+          git commit -m "Add CI build and push pipeline" || echo "No changes"
           git remote set-url origin https://${GH_TOKEN}@github.com/hoppetoss/${SERVICE_NAME}.git
-          git push origin main
+          git push origin main || echo "Push skipped"
 
       # STEP 1 — Add Helm values file in platform-infra
       - name: Register Helm values in platform-infra
