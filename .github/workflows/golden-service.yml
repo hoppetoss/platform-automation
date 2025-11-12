@@ -112,6 +112,20 @@ jobs:
           git clone https://github.com/hoppetoss/platform-infra.git
           cd platform-infra
 
+          # ensure folders exists
+          mkdir -p helm/fastapi-service
+          mkdir -p namespaces
+
+          # Namespace YAML
+          cat <<EOF > namespaces/namespace-${SERVICE_NAME}.yaml
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ${SERVICE_NAME}
+            labels:
+              team: ${SERVICE_NAME}-team
+          EOF
+
           # Helm values
           cat <<EOF > helm/fastapi-service/values-${SERVICE_NAME}.yaml
           namespace: ${SERVICE_NAME}
