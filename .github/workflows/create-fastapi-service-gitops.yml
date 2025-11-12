@@ -93,7 +93,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           SERVICE_NAME: ${{ github.event.inputs.service_name }}
         run: |
-          git clone https://github.com/hoppetoss/platform-infra.git
           cd platform-infra/argo-apps
 
           cat <<EOF > ${SERVICE_NAME}-app.yaml
