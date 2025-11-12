@@ -1,4 +1,4 @@
-name: Create New FastAPI Service for GitOps
+name: Create Golden Service for GitOps
 
 on:
   workflow_dispatch:
