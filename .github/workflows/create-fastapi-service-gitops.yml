@@ -109,7 +109,7 @@ jobs:
               path: helm/fastapi-service
               helm:
                 valueFiles:
-                  - helm/fastapi-service/values-${SERVICE_NAME}.yaml
+                  - values-${SERVICE_NAME}.yaml
             destination:
               server: https://kubernetes.default.svc
               namespace: ${SERVICE_NAME}
