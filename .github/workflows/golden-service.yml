@@ -116,16 +116,6 @@ jobs:
           mkdir -p helm/fastapi-service
           mkdir -p namespaces
 
-          # Namespace YAML
-          cat <<EOF > namespaces/namespace-${SERVICE_NAME}.yaml
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: ${SERVICE_NAME}
-            labels:
-              team: ${SERVICE_NAME}-team
-          EOF
-
           # Helm values
           cat <<EOF > helm/fastapi-service/values-${SERVICE_NAME}.yaml
           namespace: ${SERVICE_NAME}
@@ -133,6 +123,8 @@ jobs:
           image:
             repository: ghcr.io/hoppetoss/${SERVICE_NAME}
             tag: latest
+          imagePullSecrets:
+            - name: ghcr-secret
           otel:
             endpoint: "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"
           EOF
@@ -195,7 +187,23 @@ jobs:
           git commit -m "Register Argo CD app for ${SERVICE_NAME}" || echo "No changes"
           git remote set-url origin https://${GH_TOKEN}@github.com/hoppetoss/platform-infra.git
           git push origin main || echo "Push skipped"
+      # STEP 3 — Pre-create namespace and GHCR secret for image pulling
+      - name: Pre-create namespace and image pull secret
+        env:
+            GHCR_PAT: ${{ secrets.GH_PAT }}
+            SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
+            echo "⚙️ Creating namespace and GHCR pull secret for ${SERVICE_NAME}"
 
+            kubectl create namespace ${SERVICE_NAME} --dry-run=client -o yaml | kubectl apply -f -
+            kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=hoppetoss \
+            --docker-password=${GHCR_PAT} \
+            --namespace=${SERVICE_NAME} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+            echo "✅ GHCR secret configured in namespace ${SERVICE_NAME}"
       # ---------------------------------------------------------
       # 5️⃣ Output summary
       # ---------------------------------------------------------
