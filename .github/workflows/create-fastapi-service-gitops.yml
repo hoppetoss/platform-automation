@@ -61,6 +61,49 @@ jobs:
           git commit -m "Add environment configuration" || echo "No changes to commit"
           git push origin main || echo "Push skipped (possibly no changes)"
 
+      - name: Add CI build and push workflow
+        env:
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
+          cd $SERVICE_NAME
+          mkdir -p .github/workflows
+          cat <<EOF > .github/workflows/build.yml
+          name: Build and Push Image
+
+          on:
+            push:
+              branches: [ "main" ]
+
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              permissions:
+                contents: read
+                packages: write
+
+              steps:
+                - name: Checkout
+                  uses: actions/checkout@v4
+
+                - name: Log in to GitHub Container Registry
+                  uses: docker/login-action@v3
+                  with:
+                    registry: ghcr.io
+                    username: \${{ github.actor }}
+                    password: \${{ secrets.GITHUB_TOKEN }}
+
+                - name: Build and push Docker image
+                  uses: docker/build-push-action@v5
+                  with:
+                    context: .
+                    push: true
+                    tags: ghcr.io/hoppetoss/${SERVICE_NAME}:latest
+          EOF
+
+          git add .github/workflows/build.yml
+          git commit -m "Add CI build and push pipeline"
+          git push origin main
+
       # STEP 1 — Add Helm values file in platform-infra
       - name: Register Helm values in platform-infra
         env:
@@ -117,6 +160,8 @@ jobs:
               automated:
                 prune: true
                 selfHeal: true
+            syncOptions:
+              - CreateNamespace=true
           EOF
 
           git config user.name "GitHub Actions"
@@ -128,6 +173,8 @@ jobs:
 
       - name: Output success
         run: |
-          echo "🎉 FastAPI service ready:"
-          echo "🔗 https://github.com/hoppetoss/${{ github.event.inputs.service_name }}"
-          echo "🧩 Registered for GitOps in platform-infra/argo-apps/"
+          echo "🎉 FastAPI service ready!"
+          echo "🔗 Repo: https://github.com/hoppetoss/${{ github.event.inputs.service_name }}"
+          echo "📦 GHCR Image: ghcr.io/hoppetoss/${{ github.event.inputs.service_name }}:latest"
+          echo "🧩 Registered in: platform-infra/argo-apps/"
+          echo "✅ Argo CD will auto-deploy to namespace: ${{ github.event.inputs.service_name }}"
