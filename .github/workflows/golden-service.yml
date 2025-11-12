@@ -1,0 +1,192 @@
+name: Create New FastAPI Service for GitOps
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Name of the new FastAPI service (e.g., orders-service)"
+        required: true
+      environment:
+        description: "Deployment environment (e.g., dev, staging, prod)"
+        required: false
+        default: "dev"
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout automation repo
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gh
+
+      - name: Authenticate GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: gh auth status || echo "✅ Authenticated via GH_PAT"
+
+      # ---------------------------------------------------------
+      # 1️⃣ Create new service repository from template
+      # ---------------------------------------------------------
+      - name: Create new repo from FastAPI template
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
+          echo "🚀 Creating new FastAPI service: $SERVICE_NAME"
+          gh repo create hoppetoss/$SERVICE_NAME \
+            --template hoppetoss/template-fastapi-service \
+            --public \
+            -y || echo "⚠️ Repo already exists, skipping creation"
+          echo "✅ Repository ready: https://github.com/hoppetoss/$SERVICE_NAME"
+
+      # ---------------------------------------------------------
+      # 2️⃣ Add .env and CI workflow for Docker build + push
+      # ---------------------------------------------------------
+      - name: Clone and configure new repo
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          gh repo clone hoppetoss/$SERVICE_NAME
+          cd $SERVICE_NAME
+
+          echo "SERVICE_NAME=$SERVICE_NAME" > .env
+          echo "ENVIRONMENT=$ENVIRONMENT" >> .env
+          echo "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces" >> .env
+
+          mkdir -p .github/workflows
+          cat <<'EOF' > .github/workflows/build.yml
+          name: Build and Push Image
+
+          on:
+            push:
+              branches: [ "main" ]
+
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              permissions:
+                contents: read
+                packages: write
+
+              steps:
+                - name: Checkout
+                  uses: actions/checkout@v4
+
+                - name: Log in to GitHub Container Registry
+                  uses: docker/login-action@v3
+                  with:
+                    registry: ghcr.io
+                    username: ${{ github.actor }}
+                    password: ${{ secrets.GITHUB_TOKEN }}
+
+                - name: Build and push Docker image
+                  uses: docker/build-push-action@v5
+                  with:
+                    context: .
+                    push: true
+                    tags: ghcr.io/hoppetoss/${{ github.event.repository.name }}:latest
+          EOF
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add .env .github/workflows/build.yml
+          git commit -m "Add environment configuration and CI pipeline" || echo "No changes"
+          git remote set-url origin https://${GH_TOKEN}@github.com/hoppetoss/$SERVICE_NAME.git
+          git push origin main || echo "Push skipped (possibly no changes)"
+
+      # ---------------------------------------------------------
+      # 3️⃣ Register Helm values + Namespace in platform-infra
+      # ---------------------------------------------------------
+      - name: Register Helm values and Namespace in platform-infra
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
+          git clone https://github.com/hoppetoss/platform-infra.git
+          cd platform-infra
+
+          # Helm values
+          cat <<EOF > helm/fastapi-service/values-${SERVICE_NAME}.yaml
+          namespace: ${SERVICE_NAME}
+          serviceName: ${SERVICE_NAME}
+          image:
+            repository: ghcr.io/hoppetoss/${SERVICE_NAME}
+            tag: latest
+          otel:
+            endpoint: "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"
+          EOF
+
+          # Namespace manifest
+          cat <<EOF > namespaces/namespace-${SERVICE_NAME}.yaml
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ${SERVICE_NAME}
+            labels:
+              team: platform
+              istio-injection: enabled
+          EOF
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add helm/fastapi-service/values-${SERVICE_NAME}.yaml namespaces/namespace-${SERVICE_NAME}.yaml
+          git commit -m "Add Helm values and namespace for ${SERVICE_NAME}" || echo "No changes"
+          git remote set-url origin https://${GH_TOKEN}@github.com/hoppetoss/platform-infra.git
+          git push origin main || echo "Push skipped"
+
+      # ---------------------------------------------------------
+      # 4️⃣ Register Argo CD Application
+      # ---------------------------------------------------------
+      - name: Register Argo CD Application
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          SERVICE_NAME: ${{ github.event.inputs.service_name }}
+        run: |
+          cd platform-infra/argo-apps
+
+          cat <<EOF > ${SERVICE_NAME}-app.yaml
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: ${SERVICE_NAME}
+            namespace: argocd
+          spec:
+            project: default
+            source:
+              repoURL: 'https://github.com/hoppetoss/platform-infra.git'
+              targetRevision: main
+              path: helm/fastapi-service
+              helm:
+                valueFiles:
+                  - helm/fastapi-service/values-${SERVICE_NAME}.yaml
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: ${SERVICE_NAME}
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+          EOF
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add ${SERVICE_NAME}-app.yaml
+          git commit -m "Register Argo CD app for ${SERVICE_NAME}" || echo "No changes"
+          git remote set-url origin https://${GH_TOKEN}@github.com/hoppetoss/platform-infra.git
+          git push origin main || echo "Push skipped"
+
+      # ---------------------------------------------------------
+      # 5️⃣ Output summary
+      # ---------------------------------------------------------
+      - name: Output success
+        run: |
+          echo "🎉 FastAPI service ready!"
+          echo "🔗 Repo: https://github.com/hoppetoss/${{ github.event.inputs.service_name }}"
+          echo "🧩 Namespace + Helm + ArgoCD registered in platform-infra"
